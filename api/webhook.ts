@@ -1,15 +1,6 @@
-import express from 'express';
-import dotenv from 'dotenv';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { App } from 'octokit';
 import { GoogleGenAI } from '@google/genai';
-
-// Load environment variables
-dotenv.config();
-
-// Initialize Express
-const server = express();
-const port = process.env.PORT || 3000;
-server.use(express.json());
 
 let app: App;
 let ai: GoogleGenAI;
@@ -20,20 +11,14 @@ function initializeServices() {
   // Read the private key
   let privateKey = process.env.GITHUB_PRIVATE_KEY || '';
 
-  if (!privateKey && process.env.GITHUB_PRIVATE_KEY_PATH) {
-    const fs = require('fs');
-    const path = require('path');
-    privateKey = fs.readFileSync(path.resolve(process.env.GITHUB_PRIVATE_KEY_PATH), 'utf8');
-  }
-
   if (privateKey.includes('\\n')) {
     privateKey = privateKey.replace(/\\n/g, '\n');
   }
 
-  if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is missing from environment variables");
-  if (!process.env.GITHUB_APP_ID) throw new Error("GITHUB_APP_ID is missing from environment variables");
-  if (!privateKey) throw new Error("GITHUB_PRIVATE_KEY is missing from environment variables");
-  if (!process.env.GITHUB_WEBHOOK_SECRET) throw new Error("GITHUB_WEBHOOK_SECRET is missing from environment variables");
+  if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is missing in Vercel Environment Variables");
+  if (!process.env.GITHUB_APP_ID) throw new Error("GITHUB_APP_ID is missing in Vercel Environment Variables");
+  if (!privateKey) throw new Error("GITHUB_PRIVATE_KEY is missing in Vercel Environment Variables");
+  if (!process.env.GITHUB_WEBHOOK_SECRET) throw new Error("GITHUB_WEBHOOK_SECRET is missing in Vercel Environment Variables");
 
   ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   
@@ -46,11 +31,21 @@ function initializeServices() {
   });
 }
 
-server.get('/api', (req, res) => {
-  res.send('AI Code Reviewer API is running!');
-});
+// Native Vercel Serverless Handler
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Allow simple GET requests to check if it's online
+  if (req.method === 'GET') {
+    return res.status(200).send('AI Code Reviewer API is running natively on Vercel!');
+  }
 
-server.post('/api/webhook', async (req, res) => {
+  try {
+    initializeServices();
+  } catch (error: any) {
+    console.error("Initialization Error:", error);
+    // This will print the exact missing key to the GitHub Webhook response tab!
+    return res.status(500).json({ error: "Configuration Error", message: error.message });
+  }
+
   const event = req.headers['x-github-event'];
   console.log(`Received GitHub event: ${event}`);
 
@@ -67,9 +62,6 @@ server.post('/api/webhook', async (req, res) => {
         console.log(`Analyzing PR #${prNumber} in repo: ${repoOwner}/${repoName}`);
         
         try {
-          // Initialize services inside the try block to catch credential errors
-          initializeServices();
-
           // 1. Get an authenticated Octokit client
           const octokit = await app.getInstallationOctokit(installationId);
           
@@ -88,7 +80,7 @@ server.post('/api/webhook', async (req, res) => {
           
           if (!diff || diff.length === 0) {
               console.log("No diff found. Skipping review.");
-              return res.status(200).send('OK');
+              return res.status(200).json({ message: "No diff found" });
           }
 
           // 3. Send the diff to Gemini for analysis
@@ -118,6 +110,7 @@ ${diff}`;
           });
           
           console.log("Successfully posted review to GitHub!");
+          return res.status(200).json({ success: true, message: "Review posted successfully!" });
 
         } catch (error: any) {
           console.error("Error during PR review process:", error);
@@ -126,16 +119,6 @@ ${diff}`;
     }
   }
 
-  // Acknowledge receipt of the webhook
-  res.status(200).send('OK');
-});
-
-// For local development, we still want to listen on a port
-if (process.env.NODE_ENV !== 'production') {
-  server.listen(port, () => {
-    console.log(`Server is listening on port ${port}`);
-  });
+  // Acknowledge receipt of the webhook for unhandled events
+  return res.status(200).json({ message: "Webhook received but ignored" });
 }
-
-// Export the server for Vercel Serverless Functions
-module.exports = server;
