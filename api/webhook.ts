@@ -8,7 +8,7 @@ let ai: GoogleGenAI;
 function initializeServices() {
   if (app && ai) return; // Already initialized
 
-  // Read the private key
+  // Read the private key directly from environment
   let privateKey = process.env.GITHUB_PRIVATE_KEY || '';
 
   if (privateKey.includes('\\n')) {
