@@ -1,11 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { App } from 'octokit';
+import type { App } from 'octokit';
 import { GoogleGenAI } from '@google/genai';
 
 let app: App;
 let ai: GoogleGenAI;
 
-function initializeServices() {
+async function initializeServices() {
   if (app && ai) return; // Already initialized
 
   // Read the private key directly from environment
@@ -22,7 +22,11 @@ function initializeServices() {
 
   ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   
-  app = new App({
+  // Dynamically import octokit to fix Vercel CommonJS ESM bug
+  const octokitModule = await import('octokit');
+  const AppClass = octokitModule.App;
+
+  app = new AppClass({
     appId: process.env.GITHUB_APP_ID,
     privateKey: privateKey,
     webhooks: {
@@ -39,7 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    initializeServices();
+    await initializeServices();
   } catch (error: any) {
     console.error("Initialization Error:", error);
     // This will print the exact missing key to the GitHub Webhook response tab!
