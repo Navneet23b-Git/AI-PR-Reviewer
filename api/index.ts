@@ -124,4 +124,4 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Export the server for Vercel Serverless Functions
-export default server;
+module.exports = server;
