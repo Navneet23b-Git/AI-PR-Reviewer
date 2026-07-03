@@ -11,30 +11,40 @@ const server = express();
 const port = process.env.PORT || 3000;
 server.use(express.json());
 
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
+let app: App;
+let ai: GoogleGenAI;
 
-// Read the private key for GitHub App (handles Vercel env variables with \n or local file path)
-let privateKey = process.env.GITHUB_PRIVATE_KEY || '';
+function initializeServices() {
+  if (app && ai) return; // Already initialized
 
-if (!privateKey && process.env.GITHUB_PRIVATE_KEY_PATH) {
-  const fs = require('fs');
-  const path = require('path');
-  privateKey = fs.readFileSync(path.resolve(process.env.GITHUB_PRIVATE_KEY_PATH), 'utf8');
+  // Read the private key
+  let privateKey = process.env.GITHUB_PRIVATE_KEY || '';
+
+  if (!privateKey && process.env.GITHUB_PRIVATE_KEY_PATH) {
+    const fs = require('fs');
+    const path = require('path');
+    privateKey = fs.readFileSync(path.resolve(process.env.GITHUB_PRIVATE_KEY_PATH), 'utf8');
+  }
+
+  if (privateKey.includes('\\n')) {
+    privateKey = privateKey.replace(/\\n/g, '\n');
+  }
+
+  if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is missing from environment variables");
+  if (!process.env.GITHUB_APP_ID) throw new Error("GITHUB_APP_ID is missing from environment variables");
+  if (!privateKey) throw new Error("GITHUB_PRIVATE_KEY is missing from environment variables");
+  if (!process.env.GITHUB_WEBHOOK_SECRET) throw new Error("GITHUB_WEBHOOK_SECRET is missing from environment variables");
+
+  ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  
+  app = new App({
+    appId: process.env.GITHUB_APP_ID,
+    privateKey: privateKey,
+    webhooks: {
+      secret: process.env.GITHUB_WEBHOOK_SECRET
+    },
+  });
 }
-
-if (privateKey.includes('\\n')) {
-  privateKey = privateKey.replace(/\\n/g, '\n');
-}
-
-// Initialize GitHub App
-const app = new App({
-  appId: process.env.GITHUB_APP_ID!,
-  privateKey: privateKey,
-  webhooks: {
-    secret: process.env.GITHUB_WEBHOOK_SECRET!
-  },
-});
 
 server.get('/api', (req, res) => {
   res.send('AI Code Reviewer API is running!');
@@ -57,6 +67,9 @@ server.post('/api/webhook', async (req, res) => {
         console.log(`Analyzing PR #${prNumber} in repo: ${repoOwner}/${repoName}`);
         
         try {
+          // Initialize services inside the try block to catch credential errors
+          initializeServices();
+
           // 1. Get an authenticated Octokit client
           const octokit = await app.getInstallationOctokit(installationId);
           
@@ -106,8 +119,9 @@ ${diff}`;
           
           console.log("Successfully posted review to GitHub!");
 
-        } catch (error) {
+        } catch (error: any) {
           console.error("Error during PR review process:", error);
+          return res.status(500).json({ error: "Server crashed!", message: error.message, stack: error.stack });
         }
     }
   }
