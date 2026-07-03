@@ -23,7 +23,8 @@ async function initializeServices() {
   ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   
   // Dynamically import octokit to fix Vercel CommonJS ESM bug
-  const octokitModule = await import('octokit');
+  // We use new Function to completely hide the import from Vercel's esbuild transpiler
+  const octokitModule = await new Function("return import('octokit')")();
   const AppClass = octokitModule.App;
 
   app = new AppClass({
